@@ -4,7 +4,7 @@ A simple Discord bot that counts down to the release of **DELTARUNE** on Steam �
 It updates a channel name with the number of days remaining and checks Steam to detect when the game is officially released.
 
 > 🗓 Release Date: **June 5, 2025**  
-> 🎮 Steam App ID: [`1671210`](https://store.steampowered.com/app/1671210/DELTARUNE/)
+> 🎮 Steam: [`DELTARUNE`](https://store.steampowered.com/app/1671210/DELTARUNE/)
 
 ---
 
@@ -61,37 +61,9 @@ python bot.py
 
 ## 📦 Nixpacks Support
 
-If you're deploying with Nixpacks, this project includes a `nixpacks.toml`:
-
-```toml
-[phases.setup]
-nixPkgs = ["python311", "git"]
-
-[phases.install]
-cmds = [
-  "pip install --upgrade pip",
-  "pip install -r requirements.txt"
-]
-
-[start]
-cmd = "python bot.py"
-```
-
-No need to manage Docker or custom build scripts.
+If you're deploying with Nixpacks, this project includes a `nixpacks.toml`. No need to manage Docker or custom build scripts.
 
 ---
-
-## 📁 Project Structure
-
-```
-.
-├── bot.py                  # Main bot logic
-├── deltARune_bot_state.json # Persistent state tracking
-├── requirements.txt        # Python dependencies
-├── nixpacks.toml           # Nixpacks build configuration
-└── .env                    # Environment variables (not committed)
-```
-
 
 
 ## 🧠 Credits
