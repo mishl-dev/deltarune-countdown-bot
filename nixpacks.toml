@@ -1,13 +1,27 @@
 # nixpacks.toml
 
+# Define the setup phase
 [phases.setup]
-nixPkgs = ["python311", "python311Packages.venv", "git"]
+# List Nix packages required for the build environment.
+# We only need python311 (which includes venv) and git.
+nixPkgs = ["python311", "git"]
 
+# Define the install phase
 [phases.install]
+# Commands to run for installing dependencies.
 cmds = [
+  # Create a virtual environment named 'venv' using the python3 module.
   "python3 -m venv venv",
+  # Activate the virtual environment and install packages from requirements.txt.
+  # Using source venv/bin/activate ensures pip installs into the venv.
+  # Alternatively, directly using ./venv/bin/pip also works as in the original file.
   "./venv/bin/pip install -r requirements.txt"
 ]
+# Specify directories to cache between builds.
+cacheDirectories = ["/root/.cache/pip", "venv"] # Added venv to cache
 
+# Define the start phase
 [start]
+# The command to run the application.
 cmd = "./venv/bin/python bot.py"
+
