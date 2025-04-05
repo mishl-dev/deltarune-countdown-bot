@@ -27,7 +27,6 @@ This bot is designed to work with [Nixpacks](https://nixpacks.com/) and runs on 
 - Python 3.11+
 - A Discord bot token
 - A channel ID where the bot has permission to edit the name
-- [Steam App ID](https://steamdb.info/app/1671210/) for DELTARUNE
 
 ### 🛠 Setup
 
