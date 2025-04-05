@@ -1,7 +1,7 @@
 # nixpacks.toml
 
 [phases.setup]
-nixPkgs = ["python311", "git"]
+nixPkgs = ["python311", "python311Packages.pip", "git"]
 
 [phases.install]
 cmds = [
