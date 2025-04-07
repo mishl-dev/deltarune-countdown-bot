@@ -187,6 +187,8 @@ async def update_countdown():
         print(f"Error updating channel name: {e}")
 
 # Add the countdown slash command
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot.tree.command(name="countdown", description="Get a visual countdown to Deltarune's release")
 async def countdown_command(interaction: discord.Interaction):
     """Send a visual countdown image for Deltarune"""
