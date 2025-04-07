@@ -21,8 +21,8 @@ PADDING = 25
 LOGO_SCALE_FACTOR = 0.50
 
 # --- File Paths ---
-FONT_FILENAME = "assets/pixel-font.ttf"
-LOGO_FILENAME = "assets/logo.png"
+FONT_PATH = "assets/pixel-font.ttf"
+LOGO_PATH = "assets/logo.png"
 
 # --- Font Sizes ---
 FONT_SIZE_SUBTITLE = 30
