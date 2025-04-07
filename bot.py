@@ -1,11 +1,14 @@
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 import datetime
 import os
 import aiohttp
 import asyncio
 import json
 from dotenv import load_dotenv
+from countdown import create_countdown_image
+import io
 
 # Load environment variables
 load_dotenv()
@@ -65,6 +68,13 @@ async def on_ready():
     # Start the tasks when bot is ready
     update_countdown.start()
     check_steam_status.start()
+    
+    # Sync the slash command
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
 
 async def is_game_released():
     """Check if the game is available on Steam"""
@@ -175,6 +185,45 @@ async def update_countdown():
         print("Error: Bot doesn't have permission to edit channel name")
     except discord.HTTPException as e:
         print(f"Error updating channel name: {e}")
+
+# Add the countdown slash command
+@bot.tree.command(name="countdown", description="Get a visual countdown to Deltarune's release")
+async def countdown_command(interaction: discord.Interaction):
+    """Send a visual countdown image for Deltarune"""
+    try:
+        # Check if game is already released
+        if await is_game_released():
+            await interaction.response.send_message("Deltarune is out now! Go play it! https://store.steampowered.com/app/1671210/DELTARUNE/")
+            return
+        
+        # Calculate time remaining
+        now = datetime.datetime.now()
+        delta = RELEASE_DATE - now
+        
+        # Get the countdown image as bytes buffer
+        image_buffer = create_countdown_image(game_released)
+        
+        # Convert buffer to discord.File
+        image_buffer.seek(0)  # Reset buffer position to beginning
+        file = discord.File(fp=image_buffer, filename="deltarune_countdown.png")
+        
+        # Format the message based on time remaining
+        days_remaining = delta.days
+        if days_remaining > 1:
+            message = f"**{days_remaining} days** until Deltarune releases!"
+        elif days_remaining == 1:
+            message = "**Deltarune launches tomorrow!** Get ready!"
+        elif days_remaining == 0:
+            message = "**Deltarune releases today!** Keep an eye on Steam!"
+        else:
+            message = "Deltarune should be releasing very soon! Check Steam!"
+        
+        # Send the response with the image
+        await interaction.response.send_message(content=message, file=file)
+        
+    except Exception as e:
+        print(f"Error in countdown command: {e}")
+        await interaction.response.send_message("Sorry, I encountered an error generating the countdown image.", ephemeral=True)
 
 # Run the bot
 bot.run(TOKEN)
