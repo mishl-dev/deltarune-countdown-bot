@@ -73,5 +73,4 @@ Powered by Discord.py, Steam API, and fan hype.
 ---
 
 ## 📝 License
-
 MIT — do whatever, just don't sue me.
