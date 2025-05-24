@@ -16,7 +16,7 @@ load_dotenv()
 # Bot configuration
 TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNEL_ID = int(os.getenv('COUNTDOWN_CHANNEL_ID'))
-RELEASE_DATE = datetime.datetime(2025, 6, 5)
+RELEASE_DATE = datetime.datetime(2025, 6, 4)
 STEAM_APP_ID = "1671210"  # Deltarune's Steam App ID
 STATE_FILE = "deltarune_bot_state.json"  # File to store state
 
