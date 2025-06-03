@@ -3,6 +3,7 @@ import datetime
 import os
 import math
 import io
+# import pytz # Not strictly needed here if target_date_override is already aware
 
 # --- Configuration ---
 IMG_WIDTH = 600
@@ -10,8 +11,9 @@ IMG_HEIGHT = 450
 BACKGROUND_COLOR = (0, 0, 0)  # Black
 TEXT_COLOR_WHITE = (255, 255, 255)
 TEXT_COLOR_YELLOW = (255, 255, 0)
-TEXT_COLOR_GREY = (150, 150, 150)
 TEXT_COLOR_RELEASED = TEXT_COLOR_WHITE
+TEXT_COLOR_TIMER_COUNTDOWN = (173, 173, 173) # For timer when counting down
+TEXT_COLOR_FOOTNOTE = (204, 204, 204)      # For the new footnote
 
 # --- Padding ---
 PADDING = 25
@@ -29,8 +31,10 @@ LOGO_PATH = os.path.join(_SCRIPT_DIR, "assets/logo.png")
 FONT_SIZE_SUBTITLE = 30
 FONT_SIZE_DATE = 25
 FONT_SIZE_TIMER = 40
+FONT_SIZE_FOOTNOTE = 18
 
-# TARGET_DATE is now passed as an argument to create_countdown_image
+# --- Hardcoded Footnote Text ---
+FOOTNOTE_TEXT_HARDCODED = "* June 5 in Japan, Australia, and New Zealand"
 
 # --- Helper Function to Center Text within Padded Area ---
 def draw_text_centered_padded(draw, text, y, font, fill, image_width, padding):
@@ -58,14 +62,14 @@ def draw_text_centered_padded(draw, text, y, font, fill, image_width, padding):
 # --- Main Image Creation ---
 def create_countdown_image(game_released=False, target_date_override=None):
     """
-    Creates countdown image with optional "Released!" state.
+    Creates countdown image with optional "Released!" state and a hardcoded JST footnote.
 
     Args:
         game_released (bool, optional): If True, displays "Released!"
-                                         instead of the countdown timer.
+                                         instead of the countdown timer and hides footnote.
                                          Defaults to False.
         target_date_override (datetime.datetime, optional): The specific release date to count down to.
-                                                            Should be offset-aware if used with timezone-aware logic.
+                                                            Should be offset-aware for accurate countdown.
                                                             If None, this function will not produce a valid countdown.
     Returns:
         io.BytesIO or None: An io.BytesIO buffer containing the PNG image
@@ -111,29 +115,26 @@ def create_countdown_image(game_released=False, target_date_override=None):
         font_subtitle = ImageFont.truetype(FONT_PATH, FONT_SIZE_SUBTITLE)
         font_date = ImageFont.truetype(FONT_PATH, FONT_SIZE_DATE)
         font_timer = ImageFont.truetype(FONT_PATH, FONT_SIZE_TIMER)
+        font_footnote = ImageFont.truetype(FONT_PATH, FONT_SIZE_FOOTNOTE)
     except Exception as e:
         print(f"An error occurred loading font variants: {e}")
         return None
 
-    # Display target date without time/timezone for simplicity on image,
-    # but calculations will use the full aware datetime.
-    release_text_formatted = f"Releasing on {effective_target_date.strftime('%B %d, %Y')}"
-    timer_color = TEXT_COLOR_GREY
+    release_date_display_text = f"Releasing on {effective_target_date.strftime('%B %d, %Y')}"
+    
+    timer_color_actual = TEXT_COLOR_TIMER_COUNTDOWN
 
     if game_released:
         timer_text = "Released!"
-        timer_color = TEXT_COLOR_RELEASED
+        timer_color_actual = TEXT_COLOR_RELEASED
     else:
-        # ******** MODIFICATION START ********
-        # Ensure 'now' is offset-aware if 'effective_target_date' is.
         if effective_target_date.tzinfo is not None:
             now = datetime.datetime.now(effective_target_date.tzinfo)
         else:
-            # Fallback for naive target_date (e.g., during local testing without pytz)
+            print("Warning: effective_target_date is naive. Countdown might be inaccurate if a specific timezone was intended.")
             now = datetime.datetime.now()
-        # ******** MODIFICATION END ********
-
-        time_diff = effective_target_date - now # Now this subtraction should be safe
+        
+        time_diff = effective_target_date - now
 
         if time_diff.total_seconds() <= 0:
             days, hours, minutes, seconds = 0, 0, 0, 0
@@ -163,13 +164,22 @@ def create_countdown_image(game_released=False, target_date_override=None):
     else:
         current_y += FONT_SIZE_SUBTITLE + 45
 
-    date_bbox = draw_text_centered_padded(draw, release_text_formatted, current_y, font_date, TEXT_COLOR_YELLOW, IMG_WIDTH, PADDING)
+    date_bbox = draw_text_centered_padded(draw, release_date_display_text, current_y, font_date, TEXT_COLOR_YELLOW, IMG_WIDTH, PADDING)
     if date_bbox:
         current_y = date_bbox[3] + 25
     else:
         current_y += FONT_SIZE_DATE + 25
 
-    timer_bbox = draw_text_centered_padded(draw, timer_text, current_y, font_timer, timer_color, IMG_WIDTH, PADDING)
+    timer_bbox = draw_text_centered_padded(draw, timer_text, current_y, font_timer, timer_color_actual, IMG_WIDTH, PADDING)
+    if timer_bbox:
+        current_y = timer_bbox[3] + 15 
+    else:
+        current_y += FONT_SIZE_TIMER + 15
+    
+    # ******** MODIFICATION: Hardcoded footnote if game is not released ********
+    if not game_released:
+        footnote_bbox = draw_text_centered_padded(draw, FOOTNOTE_TEXT_HARDCODED, current_y, font_footnote, TEXT_COLOR_FOOTNOTE, IMG_WIDTH, PADDING)
+    # ******** END MODIFICATION ********
 
     try:
         buffer = io.BytesIO()
@@ -181,29 +191,26 @@ def create_countdown_image(game_released=False, target_date_override=None):
         return None
 
 if __name__ == "__main__":
-    # For testing, if you want to test with an aware date, import pytz and define it
-    # import pytz
-    # JST = pytz.timezone('Asia/Tokyo')
-    # actual_release_date_for_testing = datetime.datetime(2025, 6, 5, 0, 0, 0, tzinfo=JST)
-
-    # Original test with naive datetime (will use the 'else' branch for 'now' in create_countdown_image)
-    actual_release_date_for_testing_naive = datetime.datetime(2025, 6, 5, 0, 0, 0)
-
+    import pytz # Import for testing with aware datetimes
+    JST = pytz.timezone('Asia/Tokyo')
+    
+    # Test date as used in bot.py: June 5, 2025, Midnight JST
+    actual_release_date_for_testing = datetime.datetime(2025, 6, 5, 0, 0, 0, tzinfo=JST)
 
     if not os.path.exists(os.path.join(_SCRIPT_DIR, "assets")):
         print(f"Error: 'assets' directory not found at {os.path.join(_SCRIPT_DIR, 'assets')}")
         print("Please create it and add 'pixel-font.ttf' and 'logo.png'.")
     else:
-        print("\nGenerating countdown image (simulating 'not released' with NAIVE test date)...")
+        print("\nGenerating countdown image (simulating 'not released' with hardcoded footnote)...")
         image_buffer_countdown = create_countdown_image(
             game_released=False,
-            target_date_override=actual_release_date_for_testing_naive
+            target_date_override=actual_release_date_for_testing 
         )
         if image_buffer_countdown:
             try:
-                with open("deltarune_countdown_generated.png", "wb") as f:
+                with open("deltarune_countdown_generated_hardcoded_footnote.png", "wb") as f:
                     f.write(image_buffer_countdown.getvalue())
-                print("Saved countdown image: deltarune_countdown_generated.png")
+                print("Saved countdown image: deltarune_countdown_generated_hardcoded_footnote.png")
             except Exception as e:
                 print(f"Error saving countdown buffer: {e}")
         else:
@@ -211,33 +218,35 @@ if __name__ == "__main__":
 
         print("-" * 20)
 
-        print("Generating 'Released!' image (with NAIVE test date)...")
+        print("Generating 'Released!' image (footnote should NOT appear)...")
         image_buffer_released = create_countdown_image(
             game_released=True,
-            target_date_override=actual_release_date_for_testing_naive
+            target_date_override=actual_release_date_for_testing
         )
         if image_buffer_released:
             try:
-                with open("deltarune_released_generated.png", "wb") as f:
+                with open("deltarune_released_generated_no_footnote.png", "wb") as f:
                     f.write(image_buffer_released.getvalue())
-                print("Saved 'Released!' image: deltarune_released_generated.png")
+                print("Saved 'Released!' image: deltarune_released_generated_no_footnote.png")
             except Exception as e:
                 print(f"Error saving released buffer: {e}")
         else:
             print("Failed to create 'Released!' image buffer.")
 
         print("-" * 20)
-        print("Testing countdown to a future date (NAIVE, e.g., +1 day from now)")
-        future_date_for_testing_naive = datetime.datetime.now() + datetime.timedelta(days=1)
+        print("Testing countdown to a different future date (hardcoded footnote should still appear)")
+        future_date_for_testing = datetime.datetime.now(JST) + datetime.timedelta(days=10, hours=5)
+        future_date_for_testing = future_date_for_testing.replace(minute=30, second=0, microsecond=0)
+        
         image_buffer_future = create_countdown_image(
             game_released=False,
-            target_date_override=future_date_for_testing_naive
+            target_date_override=future_date_for_testing
         )
         if image_buffer_future:
             try:
-                with open("deltarune_future_countdown_generated.png", "wb") as f:
+                with open("deltarune_future_countdown_hardcoded_footnote.png", "wb") as f:
                     f.write(image_buffer_future.getvalue())
-                print("Saved future countdown image: deltarune_future_countdown_generated.png")
+                print("Saved future countdown image: deltarune_future_countdown_hardcoded_footnote.png")
             except Exception as e:
                 print(f"Error saving future countdown buffer: {e}")
         else:
