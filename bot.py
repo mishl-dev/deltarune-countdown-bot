@@ -9,6 +9,7 @@ import json
 from dotenv import load_dotenv
 from countdown import create_countdown_image # Correctly imported
 import io
+import pytz
 
 # Load environment variables
 load_dotenv()
@@ -16,8 +17,12 @@ load_dotenv()
 # Bot configuration
 TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNEL_ID = int(os.getenv('COUNTDOWN_CHANNEL_ID'))
-# Set RELEASE_DATE to midnight of the specific day for clarity
-RELEASE_DATE = datetime.datetime(2025, 6, 4, 0, 0, 0) # Midnight UTC, or adjust timezone as needed
+
+# Set RELEASE_DATE to match official Deltarune website: June 5, 2025 at 00:00 JST
+# Using pytz for proper timezone handling
+jst = pytz.timezone('Asia/Tokyo')
+RELEASE_DATE = jst.localize(datetime.datetime(2025, 6, 5, 0, 0, 0))
+
 STEAM_APP_ID = "1671210"  # Deltarune's Steam App ID
 STATE_FILE = "deltarune_bot_state.json"  # File to store state
 
@@ -34,6 +39,10 @@ game_released = False
 # Message tracking variables - we'll load these from file
 tomorrow_message_sent = False
 release_message_sent = False
+
+def get_current_utc_time():
+    """Get current time in UTC for consistent timezone handling"""
+    return datetime.datetime.now(pytz.UTC)
 
 def load_state():
     global tomorrow_message_sent, release_message_sent, game_released
@@ -53,7 +62,6 @@ def load_state():
         tomorrow_message_sent = False
         release_message_sent = False
         game_released = False
-
 
 def save_state():
     try:
@@ -88,7 +96,6 @@ async def on_ready():
                 print("Corrected channel name to 'deltarune-is-out-now' on restart.")
              except Exception as e:
                 print(f"Could not correct channel name on restart: {e}")
-
 
     try:
         synced = await bot.tree.sync()
@@ -149,11 +156,10 @@ async def check_steam_status():
                 # check_steam_status.cancel() # Or stop it entirely
             except Exception as e:
                 print(f"Error updating channel/sending message for release: {e}")
-    elif not steam_confirms_release and datetime.datetime.now() > RELEASE_DATE + datetime.timedelta(days=1) :
+    elif not steam_confirms_release and get_current_utc_time() > RELEASE_DATE.astimezone(pytz.UTC) + datetime.timedelta(days=1) :
         # If past release date significantly and still not out, reduce check frequency
         check_steam_status.change_interval(hours=1)
         print("Past release date, game not detected as out. Reducing Steam check frequency.")
-
 
 @tasks.loop(minutes=5)
 async def update_countdown():
@@ -169,17 +175,21 @@ async def update_countdown():
         print(f"Error: Could not find channel with ID {CHANNEL_ID} for countdown update.")
         return
 
-    today = datetime.datetime.now()
-    # Ensure we're comparing against the same RELEASE_DATE definition
-    delta = RELEASE_DATE - today
+    # Use timezone-aware time for consistent calculations
+    current_utc = get_current_utc_time()
+    # Convert release date to UTC for comparison
+    release_date_utc = RELEASE_DATE.astimezone(pytz.UTC)
+    delta = release_date_utc - current_utc
     days_remaining = delta.days
+    hours_remaining = delta.seconds // 3600
 
     new_name = ""
     send_message_content = None
 
     if days_remaining > 1:
         new_name = f"deltarune-in-{days_remaining}-days"
-    elif days_remaining == 1:
+    elif days_remaining == 1 or (days_remaining == 0 and hours_remaining > 12):
+        # If less than 24 hours but more than 12 hours, still consider it "tomorrow"
         new_name = "deltarune-tomorrow"
         if not tomorrow_message_sent:
             send_message_content = ("@everyone **DELTARUNE LAUNCHES TOMORROW!** \n" +
@@ -187,11 +197,11 @@ async def update_countdown():
             tomorrow_message_sent = True
             save_state() # Save state after marking message sent
             print("Sent 'tomorrow' notification.")
-    elif days_remaining == 0:
+    elif days_remaining == 0 and hours_remaining >= 0:
         # It's release day, but Steam API might not have confirmed yet.
         # check_steam_status will handle the "is-out-now" change when confirmed.
         new_name = "deltarune-releases-today"
-    else: # days_remaining < 0 (RELEASE_DATE has passed)
+    else: # RELEASE_DATE has passed
         # If RELEASE_DATE has passed but game_released is still False,
         # check_steam_status is still looking. Channel name reflects uncertainty.
         new_name = "deltarune-check-steam"
@@ -200,7 +210,7 @@ async def update_countdown():
     if new_name and channel.name != new_name:
         try:
             await channel.edit(name=new_name)
-            print(f"Updated channel name to {new_name}")
+            print(f"Updated channel name to {new_name} (UTC time: {current_utc}, Days remaining: {days_remaining}, Hours remaining: {hours_remaining})")
         except discord.Forbidden:
             print("Error: Bot doesn't have permission to edit channel name.")
         except discord.HTTPException as e:
@@ -211,7 +221,6 @@ async def update_countdown():
             await channel.send(send_message_content)
         except Exception as e:
             print(f"Error sending scheduled message: {e}")
-
 
 @bot.tree.command(name="countdown", description="Get a visual countdown to Deltarune's release")
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -226,10 +235,8 @@ async def countdown_command(interaction: discord.Interaction):
         if not current_release_status_for_image: # If not globally marked, do a quick check
             current_release_status_for_image = await is_game_released_from_steam()
             if current_release_status_for_image and not game_released: # Update global if fresh check finds it
-                global game_released_global_ref
-                game_released_global_ref = True # Access global game_released for update
+                game_released = True # Update the global variable directly
                 save_state()
-
 
         # The image generator needs the target date for its "Releasing on" text and countdown calc
         image_buffer = create_countdown_image(
@@ -248,18 +255,25 @@ async def countdown_command(interaction: discord.Interaction):
         if current_release_status_for_image:
             text_message = "Deltarune is out now! Go play it! https://store.steampowered.com/app/1671210/DELTARUNE/"
         else:
-            now = datetime.datetime.now()
-            delta = RELEASE_DATE - now
+            # Use timezone-aware time for consistent calculations
+            current_utc = get_current_utc_time()
+            # Convert release date to UTC for comparison
+            release_date_utc = RELEASE_DATE.astimezone(pytz.UTC)
+            delta = release_date_utc - current_utc
             days_remaining = delta.days
+            hours_remaining = delta.seconds // 3600
+            total_hours = int(delta.total_seconds() // 3600)
 
-            if days_remaining > 1:
-                text_message = f"**{days_remaining} days** until Deltarune's target release date ({RELEASE_DATE.strftime('%B %d, %Y')})!"
-            elif days_remaining == 1:
-                text_message = f"**Deltarune's target release is tomorrow ({RELEASE_DATE.strftime('%B %d, %Y')})!** Get ready!"
-            elif days_remaining == 0:
-                text_message = f"**Deltarune's target release is today ({RELEASE_DATE.strftime('%B %d, %Y')})!** Keep an eye on Steam!"
-            else: # RELEASE_DATE has passed, but not confirmed released by Steam via current_release_status_for_image
-                text_message = (f"The target release date ({RELEASE_DATE.strftime('%B %d, %Y')}) has passed. "
+            if total_hours > 48:
+                text_message = f"**{days_remaining} days** until Deltarune's release date ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')})!"
+            elif total_hours > 24:
+                text_message = f"**Deltarune releases tomorrow ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')})!** Get ready!"
+            elif total_hours > 0:
+                text_message = f"**Deltarune releases today in {total_hours} hours ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')})!** Keep an eye on Steam!"
+            elif total_hours >= -12:  # Within 12 hours past release time
+                text_message = f"**Deltarune should be releasing now ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')})!** Check Steam!"
+            else: # RELEASE_DATE has passed by more than 12 hours
+                text_message = (f"The target release date ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')}) has passed. "
                                 "It should be out or releasing very soon! Check Steam for the latest.")
                                 
         await interaction.followup.send(content=text_message, file=file)
@@ -271,10 +285,6 @@ async def countdown_command(interaction: discord.Interaction):
             await interaction.response.send_message("Sorry, I encountered an error processing your request.", ephemeral=True)
         else:
             await interaction.followup.send("Sorry, I encountered an error processing your request.", ephemeral=True)
-
-# This is needed to modify global game_released within countdown_command if a fresh check is done.
-# A cleaner way would be to pass bot instance or use a class for the cog.
-game_released_global_ref = game_released
 
 if __name__ == "__main__":
     if TOKEN is None or CHANNEL_ID is None:
