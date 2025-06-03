@@ -254,17 +254,17 @@ async def countdown_command(interaction: discord.Interaction):
             days_remaining = delta.days
 
             if days_remaining > 1:
-                text_message = f"**{days_remaining} days** until Deltarune releases (target: {target_dt_str})!"
+                text_message = f"**{days_remaining} days** until Deltarune releases !"
             elif days_remaining == 1:
-                text_message = f"**Deltarune releases tomorrow!** (Target: {target_dt_str}) Get ready!"
+                text_message = f"**Deltarune releases tomorrow!**  Get ready!"
             elif days_remaining == 0 and hours_remaining > 1:
-                text_message = f"**{hours_remaining} hours** until Deltarune releases (target: {target_dt_str})!"
+                text_message = f"**{hours_remaining} hours** until Deltarune releases !"
             elif days_remaining == 0 and hours_remaining == 1:
-                text_message = f"**{hours_remaining} hour** until Deltarune releases (target: {target_dt_str})!"
+                text_message = f"**{hours_remaining} hour** until Deltarune releases !"
             elif days_remaining == 0 and hours_remaining <= 0:
-                text_message = f"**Deltarune releases today!** (Target: {target_dt_str}) Keep an eye on Steam!"
+                text_message = f"**Deltarune releases today!**  Keep an eye on Steam!"
             else:
-                text_message = (f"The target release time ({target_dt_str}) has passed. "
+                text_message = (f"The target release time has passed. "
                                 "It should be out or releasing very soon! Check Steam for the latest.")
 
         await interaction.followup.send(content=text_message, file=file)
