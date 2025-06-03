@@ -40,21 +40,15 @@ def draw_text_centered_padded(draw, text, y, font, fill, image_width, padding):
         available_width = image_width
 
     try:
-        # Pillow versions >= 9.2.0 prefer `anchor` in `textbbox` as well.
-        # For older versions, anchor might not be available in textbbox.
-        # We calculate based on left, top (lt) anchor for positioning.
-        bbox_lt = draw.textbbox((padding, y), text, font=font) # Get bbox assuming (0,0) or a known point
+        bbox_lt = draw.textbbox((padding, y), text, font=font)
         text_width = bbox_lt[2] - bbox_lt[0]
         text_height = bbox_lt[3] - bbox_lt[1]
 
         inner_x = (available_width - text_width) / 2
         x = padding + inner_x
-        x = max(padding, x) # Ensure it doesn't go outside left padding
+        x = max(padding, x)
 
-        draw.text((x, y), text, font=font, fill=fill) # Default anchor is 'la' (left, top of ascender)
-                                                      # or 'lt' for some fonts/versions.
-                                                      # For pixel fonts, 'lt' often works best.
-        # Return the actual drawn bounding box
+        draw.text((x, y), text, font=font, fill=fill)
         final_bbox = (x, y, x + text_width, y + text_height)
         return final_bbox
     except Exception as e:
@@ -71,6 +65,7 @@ def create_countdown_image(game_released=False, target_date_override=None):
                                          instead of the countdown timer.
                                          Defaults to False.
         target_date_override (datetime.datetime, optional): The specific release date to count down to.
+                                                            Should be offset-aware if used with timezone-aware logic.
                                                             If None, this function will not produce a valid countdown.
     Returns:
         io.BytesIO or None: An io.BytesIO buffer containing the PNG image
@@ -99,7 +94,7 @@ def create_countdown_image(game_released=False, target_date_override=None):
         if logo_img.mode != 'RGBA':
             if logo_img.mode == 'P' and 'transparency' in logo_img.info:
                 logo_img = logo_img.convert('RGBA')
-            elif logo_img.mode != 'RGB': # Ensure conversion if not RGB or RGBA (e.g. L, LA)
+            elif logo_img.mode != 'RGB':
                  logo_img = logo_img.convert('RGBA')
         logo_width, logo_height = logo_img.size
     except Exception as e:
@@ -120,6 +115,8 @@ def create_countdown_image(game_released=False, target_date_override=None):
         print(f"An error occurred loading font variants: {e}")
         return None
 
+    # Display target date without time/timezone for simplicity on image,
+    # but calculations will use the full aware datetime.
     release_text_formatted = f"Releasing on {effective_target_date.strftime('%B %d, %Y')}"
     timer_color = TEXT_COLOR_GREY
 
@@ -127,10 +124,18 @@ def create_countdown_image(game_released=False, target_date_override=None):
         timer_text = "Released!"
         timer_color = TEXT_COLOR_RELEASED
     else:
-        now = datetime.datetime.now()
-        time_diff = effective_target_date - now
+        # ******** MODIFICATION START ********
+        # Ensure 'now' is offset-aware if 'effective_target_date' is.
+        if effective_target_date.tzinfo is not None:
+            now = datetime.datetime.now(effective_target_date.tzinfo)
+        else:
+            # Fallback for naive target_date (e.g., during local testing without pytz)
+            now = datetime.datetime.now()
+        # ******** MODIFICATION END ********
 
-        if time_diff.total_seconds() <= 0: # Use <= to include the exact moment
+        time_diff = effective_target_date - now # Now this subtraction should be safe
+
+        if time_diff.total_seconds() <= 0:
             days, hours, minutes, seconds = 0, 0, 0, 0
             timer_text = f"{days:02d} : {hours:02d} : {minutes:02d} : {seconds:02d}"
         else:
@@ -149,58 +154,50 @@ def create_countdown_image(game_released=False, target_date_override=None):
              img.paste(logo_img, paste_position)
     except Exception as e:
         print(f"Error pasting logo: {e}")
-        # Optionally return None here if logo is critical
 
     current_y = logo_y + logo_height + 20
 
     subtitle_bbox = draw_text_centered_padded(draw, "Chapters 1-4", current_y, font_subtitle, TEXT_COLOR_WHITE, IMG_WIDTH, PADDING)
     if subtitle_bbox:
         current_y = subtitle_bbox[3] + 45
-    else: # Handle error if text drawing failed
-        current_y += FONT_SIZE_SUBTITLE + 45 # Approximate advance
-
+    else:
+        current_y += FONT_SIZE_SUBTITLE + 45
 
     date_bbox = draw_text_centered_padded(draw, release_text_formatted, current_y, font_date, TEXT_COLOR_YELLOW, IMG_WIDTH, PADDING)
     if date_bbox:
         current_y = date_bbox[3] + 25
     else:
-        current_y += FONT_SIZE_DATE + 25 # Approximate advance
-
-
-    # Check vertical space for timer text
-    # Pillow's textbbox can be used to estimate height before drawing if needed
-    # timer_test_bbox = draw.textbbox((PADDING, current_y), timer_text, font=font_timer)
-    # timer_height = timer_test_bbox[3] - timer_test_bbox[1]
-    # if current_y + timer_height > IMG_HEIGHT - PADDING:
-    #      print(f"Warning: Timer text might extend below padding.")
+        current_y += FONT_SIZE_DATE + 25
 
     timer_bbox = draw_text_centered_padded(draw, timer_text, current_y, font_timer, timer_color, IMG_WIDTH, PADDING)
-    # No need to advance current_y further if this is the last element
 
     try:
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
         buffer.seek(0)
-        # print("Image successfully created in buffer.") # Less verbose for bot use
         return buffer
     except Exception as e:
         print(f"Error saving image to buffer: {e}")
         return None
 
 if __name__ == "__main__":
-    # Define the actual release date used by the bot for consistent testing
-    actual_release_date_for_testing = datetime.datetime(2025, 6, 4, 0, 0, 0)
+    # For testing, if you want to test with an aware date, import pytz and define it
+    # import pytz
+    # JST = pytz.timezone('Asia/Tokyo')
+    # actual_release_date_for_testing = datetime.datetime(2025, 6, 5, 0, 0, 0, tzinfo=JST)
 
-    # Ensure assets folder exists for standalone testing
+    # Original test with naive datetime (will use the 'else' branch for 'now' in create_countdown_image)
+    actual_release_date_for_testing_naive = datetime.datetime(2025, 6, 5, 0, 0, 0)
+
+
     if not os.path.exists(os.path.join(_SCRIPT_DIR, "assets")):
         print(f"Error: 'assets' directory not found at {os.path.join(_SCRIPT_DIR, 'assets')}")
         print("Please create it and add 'pixel-font.ttf' and 'logo.png'.")
     else:
-        print("\nGenerating countdown image (simulating 'not released')...")
-        # Test with the actual release date
+        print("\nGenerating countdown image (simulating 'not released' with NAIVE test date)...")
         image_buffer_countdown = create_countdown_image(
             game_released=False,
-            target_date_override=actual_release_date_for_testing
+            target_date_override=actual_release_date_for_testing_naive
         )
         if image_buffer_countdown:
             try:
@@ -214,10 +211,10 @@ if __name__ == "__main__":
 
         print("-" * 20)
 
-        print("Generating 'Released!' image...")
+        print("Generating 'Released!' image (with NAIVE test date)...")
         image_buffer_released = create_countdown_image(
             game_released=True,
-            target_date_override=actual_release_date_for_testing
+            target_date_override=actual_release_date_for_testing_naive
         )
         if image_buffer_released:
             try:
@@ -230,11 +227,11 @@ if __name__ == "__main__":
             print("Failed to create 'Released!' image buffer.")
 
         print("-" * 20)
-        print("Testing countdown to a future date (e.g., +1 day from now)")
-        future_date_for_testing = datetime.datetime.now() + datetime.timedelta(days=1)
+        print("Testing countdown to a future date (NAIVE, e.g., +1 day from now)")
+        future_date_for_testing_naive = datetime.datetime.now() + datetime.timedelta(days=1)
         image_buffer_future = create_countdown_image(
             game_released=False,
-            target_date_override=future_date_for_testing
+            target_date_override=future_date_for_testing_naive
         )
         if image_buffer_future:
             try:
