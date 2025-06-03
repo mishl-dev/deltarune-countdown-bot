@@ -197,34 +197,5 @@ def create_countdown_image(game_released=False): # Added game_released parameter
         return None
 
 
-# --- Example Usage ---
-if __name__ == "__main__":
-    # Example 1: Generate countdown image (default)
-    print("\nGenerating countdown image...")
-    image_buffer_countdown = create_countdown_image()
-    if image_buffer_countdown:
-        print("Successfully received countdown buffer.")
-        try:
-            with open("deltarune_countdown_buffer.png", "wb") as f:
-                f.write(image_buffer_countdown.getvalue())
-            print("Saved countdown image for verification.")
-        except Exception as e:
-            print(f"Error saving countdown buffer: {e}")
-    else:
-        print("Failed to create countdown image buffer.")
-
-    print("-" * 20)
-
-    # Example 2: Generate "Released!" image
-    print("Generating 'Released!' image...")
-    image_buffer_released = create_countdown_image(game_released=True) # Pass the optional argument
-    if image_buffer_released:
-        print("Successfully received 'Released!' buffer.")
-        try:
-            with open("deltarune_released_buffer.png", "wb") as f:
-                f.write(image_buffer_released.getvalue())
-            print("Saved 'Released!' image for verification.")
-        except Exception as e:
-            print(f"Error saving released buffer: {e}")
-    else:
-        print("Failed to create 'Released!' image buffer.")
+# Run the bot
+bot.run(TOKEN)
