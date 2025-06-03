@@ -171,15 +171,15 @@ def create_countdown_image(game_released=False, target_date_override=None):
         current_y += FONT_SIZE_DATE + 25
 
     timer_bbox = draw_text_centered_padded(draw, timer_text, current_y, font_timer, timer_color_actual, IMG_WIDTH, PADDING)
+    # ******** MODIFICATION: Increased spacing after timer ********
     if timer_bbox:
-        current_y = timer_bbox[3] + 15 
+        current_y = timer_bbox[3] + 25 # Increased from 15 to 25
     else:
-        current_y += FONT_SIZE_TIMER + 15
+        current_y += FONT_SIZE_TIMER + 25 # Increased from 15 to 25
+    # ******** END MODIFICATION ********
     
-    # ******** MODIFICATION: Hardcoded footnote if game is not released ********
     if not game_released:
         footnote_bbox = draw_text_centered_padded(draw, FOOTNOTE_TEXT_HARDCODED, current_y, font_footnote, TEXT_COLOR_FOOTNOTE, IMG_WIDTH, PADDING)
-    # ******** END MODIFICATION ********
 
     try:
         buffer = io.BytesIO()
@@ -194,23 +194,22 @@ if __name__ == "__main__":
     import pytz # Import for testing with aware datetimes
     JST = pytz.timezone('Asia/Tokyo')
     
-    # Test date as used in bot.py: June 5, 2025, Midnight JST
     actual_release_date_for_testing = datetime.datetime(2025, 6, 5, 0, 0, 0, tzinfo=JST)
 
     if not os.path.exists(os.path.join(_SCRIPT_DIR, "assets")):
         print(f"Error: 'assets' directory not found at {os.path.join(_SCRIPT_DIR, 'assets')}")
         print("Please create it and add 'pixel-font.ttf' and 'logo.png'.")
     else:
-        print("\nGenerating countdown image (simulating 'not released' with hardcoded footnote)...")
+        print("\nGenerating countdown image (simulating 'not released' with increased footnote spacing)...")
         image_buffer_countdown = create_countdown_image(
             game_released=False,
             target_date_override=actual_release_date_for_testing 
         )
         if image_buffer_countdown:
             try:
-                with open("deltarune_countdown_generated_hardcoded_footnote.png", "wb") as f:
+                with open("deltarune_countdown_spaced_footnote.png", "wb") as f:
                     f.write(image_buffer_countdown.getvalue())
-                print("Saved countdown image: deltarune_countdown_generated_hardcoded_footnote.png")
+                print("Saved countdown image: deltarune_countdown_spaced_footnote.png")
             except Exception as e:
                 print(f"Error saving countdown buffer: {e}")
         else:
@@ -225,29 +224,10 @@ if __name__ == "__main__":
         )
         if image_buffer_released:
             try:
-                with open("deltarune_released_generated_no_footnote.png", "wb") as f:
+                with open("deltarune_released_no_footnote.png", "wb") as f:
                     f.write(image_buffer_released.getvalue())
                 print("Saved 'Released!' image: deltarune_released_generated_no_footnote.png")
             except Exception as e:
                 print(f"Error saving released buffer: {e}")
         else:
             print("Failed to create 'Released!' image buffer.")
-
-        print("-" * 20)
-        print("Testing countdown to a different future date (hardcoded footnote should still appear)")
-        future_date_for_testing = datetime.datetime.now(JST) + datetime.timedelta(days=10, hours=5)
-        future_date_for_testing = future_date_for_testing.replace(minute=30, second=0, microsecond=0)
-        
-        image_buffer_future = create_countdown_image(
-            game_released=False,
-            target_date_override=future_date_for_testing
-        )
-        if image_buffer_future:
-            try:
-                with open("deltarune_future_countdown_hardcoded_footnote.png", "wb") as f:
-                    f.write(image_buffer_future.getvalue())
-                print("Saved future countdown image: deltarune_future_countdown_hardcoded_footnote.png")
-            except Exception as e:
-                print(f"Error saving future countdown buffer: {e}")
-        else:
-            print("Failed to create future countdown image buffer.")
