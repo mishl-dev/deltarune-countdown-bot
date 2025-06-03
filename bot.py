@@ -19,7 +19,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNEL_ID = int(os.getenv('COUNTDOWN_CHANNEL_ID'))
 # Set RELEASE_DATE to midnight of the specific day in Japan timezone
 JAPAN_TIMEZONE = pytz.timezone('Asia/Tokyo')
-RELEASE_DATE_JST = datetime.datetime(2025, 6, 4, 0, 0, 0, tzinfo=JAPAN_TIMEZONE) # Midnight JST
+RELEASE_DATE_JST = datetime.datetime(2025, 6, 5, 0, 0, 0, tzinfo=JAPAN_TIMEZONE) # Midnight JST
 
 STEAM_APP_ID = "1671210"  # Deltarune's Steam App ID
 STATE_FILE = "deltarune_bot_state.json"  # File to store state
