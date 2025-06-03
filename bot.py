@@ -112,7 +112,7 @@ async def is_game_released_from_steam():
 
 @tasks.loop(minutes=1)
 async def check_steam_status():
-    global game_released, release_message_sent
+    global game_released, release_message_sent # Correctly at the top of the function
 
     if game_released and release_message_sent:
         check_steam_status.cancel()
@@ -123,7 +123,7 @@ async def check_steam_status():
 
     if steam_confirms_release and not game_released:
         print("Steam API confirms game is released!")
-        game_released = True
+        game_released = True # Modifies global
         save_state()
 
     if game_released and not release_message_sent:
@@ -136,9 +136,9 @@ async def check_steam_status():
                 print(f"Game released! Updated channel name to {new_name}")
 
                 await channel.send("@everyone **DELTARUNE IS OUT NOW!** \n" +
-                                  f"https://store.steampowered.com/app/{STEAM_APP_ID}/DELTARUNE/") # Used STEAM_APP_ID
+                                  f"https://store.steampowered.com/app/{STEAM_APP_ID}/DELTARUNE/")
                 print("Sent release announcement.")
-                release_message_sent = True
+                release_message_sent = True # Modifies global
                 save_state()
 
                 update_countdown.cancel()
@@ -153,7 +153,7 @@ async def check_steam_status():
 
 @tasks.loop(minutes=5)
 async def update_countdown():
-    global tomorrow_message_sent, game_released
+    global tomorrow_message_sent, game_released # Correctly at the top
 
     if game_released:
         print("Countdown update: Game is marked released. Task stopping.")
@@ -181,7 +181,7 @@ async def update_countdown():
         if not tomorrow_message_sent:
             send_message_content = ("@everyone **DELTARUNE LAUNCHES TOMORROW!** \n" +
                                     "Get ready to play! The wait is almost over!")
-            tomorrow_message_sent = True
+            tomorrow_message_sent = True # Modifies global
             save_state()
             print("Sent 'tomorrow' notification.")
     elif days_remaining == 0 and hours_remaining > 0:
@@ -213,21 +213,28 @@ async def update_countdown():
 async def countdown_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
 
+    # ******** MODIFICATION START ********
+    # Declare that we intend to use (and possibly modify) the global 'game_released'
+    # This MUST come before any use of 'game_released' in this function.
+    global game_released
+    # ******** MODIFICATION END ********
+
     try:
+        # Now this read is fine, as 'game_released' is understood to be global for this scope
         current_release_status_for_image = game_released
+
         if not current_release_status_for_image:
-            current_release_status_for_image = await is_game_released_from_steam()
-            # ******** MODIFICATION START ********
-            if current_release_status_for_image and not game_released: # Check against the actual global
-                # This 'global' keyword refers to the module-level 'game_released'
-                global game_released
-                game_released = True # Modify the actual global 'game_released'
-                save_state()
-            # ******** MODIFICATION END ********
+            # Perform a fresh check
+            steam_check_result = await is_game_released_from_steam()
+            if steam_check_result:
+                current_release_status_for_image = True # Update local var for current command execution
+                if not game_released: # Check if the global state actually needs updating
+                    game_released = True # Modify the actual global 'game_released'
+                    save_state() # Save the new global state
 
         image_buffer = create_countdown_image(
             game_released=current_release_status_for_image,
-            target_date_override=RELEASE_DATE_JST # This is already offset-aware
+            target_date_override=RELEASE_DATE_JST
         )
 
         if image_buffer is None:
@@ -241,13 +248,13 @@ async def countdown_command(interaction: discord.Interaction):
         if current_release_status_for_image:
             text_message = f"Deltarune is out now! Go play it! https://store.steampowered.com/app/{STEAM_APP_ID}/DELTARUNE/"
         else:
-            now = datetime.datetime.now(JAPAN_TIMEZONE) # Ensure 'now' is aware for text message logic
+            now = datetime.datetime.now(JAPAN_TIMEZONE)
             delta = RELEASE_DATE_JST - now
             total_seconds = delta.total_seconds()
             hours_remaining = int(total_seconds // 3600)
             days_remaining = delta.days
 
-            date_str = RELEASE_DATE_JST.strftime('%B %d, %Y') # No timezone for user-facing text
+            date_str = RELEASE_DATE_JST.strftime('%B %d, %Y')
 
             if days_remaining > 1:
                 text_message = f"**{days_remaining} days** until Deltarune's target release date ({date_str})!"
@@ -257,22 +264,24 @@ async def countdown_command(interaction: discord.Interaction):
                 text_message = f"**{hours_remaining} hours** until Deltarune's target release date ({date_str})!"
             elif days_remaining == 0 and hours_remaining == 1:
                 text_message = f"**{hours_remaining} hour** until Deltarune's target release date ({date_str})!"
-            elif days_remaining == 0 and hours_remaining <= 0: # Release day, within the hour or passed
+            elif days_remaining == 0 and hours_remaining <= 0:
                 text_message = f"**Deltarune's target release is today ({date_str})!** Keep an eye on Steam!"
-            else: # Target date has passed
+            else:
                 text_message = (f"The target release date ({date_str}) has passed. "
                                 "It should be out or releasing very soon! Check Steam for the latest.")
 
         await interaction.followup.send(content=text_message, file=file)
 
     except Exception as e:
-        print(f"Error in countdown command: {e}")
+        print(f"Error in countdown command: {e}") # Good to log the specific exception
+        # Check if already responded to avoid "Interaction already responded" error.
+        # followup.send can be used if interaction.response.is_done() is True.
         if not interaction.response.is_done():
-            await interaction.followup.send("Sorry, I encountered an error processing your request.", ephemeral=True)
-        else: # Should usually be followup if defer was successful
+             # This state is unusual if defer was successful, but as a fallback.
+            await interaction.response.send_message("Sorry, I encountered an error processing your request.", ephemeral=True)
+        else:
             await interaction.followup.send("Sorry, I encountered an error processing your request.", ephemeral=True)
 
-# Removed: game_released_global_ref = game_released (no longer needed with direct 'global game_released' usage)
 
 if __name__ == "__main__":
     if TOKEN is None or CHANNEL_ID is None:
