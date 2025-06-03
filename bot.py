@@ -1,286 +1,230 @@
-import discord
-from discord.ext import commands, tasks
-from discord import app_commands
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import datetime
 import os
-import aiohttp
-import asyncio
-import json
-from dotenv import load_dotenv
-from countdown import create_countdown_image
+import math
 import io
 import pytz
 
-# Load environment variables
-load_dotenv()
+# --- Configuration ---
+IMG_WIDTH = 600
+IMG_HEIGHT = 450
+BACKGROUND_COLOR = (0, 0, 0)  # Black
+TEXT_COLOR_WHITE = (255, 255, 255)
+TEXT_COLOR_YELLOW = (255, 255, 0)
+TEXT_COLOR_GREY = (150, 150, 150)
+# Optional: Define a specific color for the "Released!" text if desired
+TEXT_COLOR_RELEASED = TEXT_COLOR_WHITE # Use white for "Released!"
 
-# Bot configuration
-TOKEN = os.getenv('DISCORD_TOKEN')
-CHANNEL_ID = int(os.getenv('COUNTDOWN_CHANNEL_ID'))
+# --- Padding ---
+PADDING = 25
 
-# Set RELEASE_DATE to match official Deltarune website: June 5, 2025 at 00:00 JST
-# Using pytz for proper timezone handling
-jst = pytz.timezone('Asia/Tokyo')
-RELEASE_DATE = jst.localize(datetime.datetime(2025, 6, 5, 0, 0, 0))
+# --- Logo Scaling ---
+LOGO_SCALE_FACTOR = 0.50
 
-STEAM_APP_ID = "1671210"  # Deltarune's Steam App ID
-STATE_FILE = "deltarune_bot_state.json"  # File to store state
+# --- File Paths ---
+FONT_PATH = "assets/pixel-font.ttf"
+LOGO_PATH = "assets/logo.png"
 
-# Set up intents
-intents = discord.Intents.default()
-intents.message_content = True
+# --- Font Sizes ---
+FONT_SIZE_SUBTITLE = 30
+FONT_SIZE_DATE = 25
+FONT_SIZE_TIMER = 40 # Font size for countdown AND "Released!" text
 
-# Initialize bot
-bot = commands.Bot(command_prefix='!', intents=intents)
+# --- Target Date ---
+TARGET_DATE = datetime.datetime(2025, 6, 5, 0, 0, 0) # June 5, 2025, midnight
+TIMEZONE = pytz.timezone('Asia/Tokyo') # Define the Japan timezone
 
-# Game release status (global, managed by tasks and API checks)
-game_released = False
-
-# Message tracking variables - we'll load these from file
-tomorrow_message_sent = False
-release_message_sent = False
-
-def get_current_utc_time():
-    """Get current time in UTC for consistent timezone handling"""
-    return datetime.datetime.now(pytz.UTC)
-
-def load_state():
-    global tomorrow_message_sent, release_message_sent, game_released
-    try:
-        if os.path.exists(STATE_FILE):
-            with open(STATE_FILE, 'r') as f:
-                state = json.load(f)
-                tomorrow_message_sent = state.get('tomorrow_message_sent', False)
-                release_message_sent = state.get('release_message_sent', False)
-                game_released = state.get('game_released', False)
-                print(f"Loaded state: tomorrow_message_sent={tomorrow_message_sent}, release_message_sent={release_message_sent}, game_released={game_released}")
-        else:
-            print("State file not found, starting with default state.")
-    except Exception as e:
-        print(f"Error loading state: {e}. Using default state.")
-        tomorrow_message_sent = False
-        release_message_sent = False
-        game_released = False
-
-def save_state():
-    try:
-        state = {
-            'tomorrow_message_sent': tomorrow_message_sent,
-            'release_message_sent': release_message_sent,
-            'game_released': game_released
-        }
-        with open(STATE_FILE, 'w') as f:
-            json.dump(state, f, indent=4)
-            print("State saved to file")
-    except Exception as e:
-        print(f"Error saving state: {e}")
-
-@bot.event
-async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
-    load_state()
-
-    # Start tasks only if the game hasn't been marked as released and announced
-    if not game_released or not release_message_sent:
-        update_countdown.start()
-        check_steam_status.start()
-        print("Countdown and Steam check tasks started.")
-    else:
-        print("Game already marked as released and announced. Tasks not started.")
-        # Optionally, ensure channel name is correct if bot restarts after release
-        channel = bot.get_channel(CHANNEL_ID)
-        if channel and not channel.name.endswith("-is-out-now"):
-            try:
-                await channel.edit(name="deltarune-is-out-now")
-                print("Corrected channel name to 'deltarune-is-out-now' on restart.")
-            except Exception as e:
-                print(f"Could not correct channel name on restart: {e}")
+# --- Helper Function to Center Text within Padded Area ---
+def draw_text_centered_padded(draw, text, y, font, fill, image_width, padding):
+    """Draws text horizontally centered within the padded area and returns its bounding box."""
+    available_width = image_width - (2 * padding)
+    if available_width <= 0:
+        print("Warning: Padding is too large for image width.")
+        available_width = image_width
 
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Error syncing commands: {e}")
+        bbox = draw.textbbox((padding, y), text, font=font, anchor='lt')
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
 
-async def is_game_released_from_steam():
-    """Check if the game is available on Steam. Does NOT modify global game_released directly."""
+        inner_x = (available_width - text_width) / 2
+        x = padding + inner_x
+        x = max(padding, x)
+
+        draw.text((x, y), text, font=font, fill=fill, anchor='lt')
+
+        final_bbox = (x, y, x + text_width, y + text_height)
+        return final_bbox
+    except Exception as e:
+        print(f"Error drawing text '{text}': {e}")
+        return None
+
+# --- Main Image Creation ---
+def create_countdown_image(game_released=False): # Added game_released parameter
+    """
+    Creates countdown image with optional "Released!" state.
+
+    Args:
+        game_released (bool, optional): If True, displays "Released!"
+                                         instead of the countdown timer.
+                                         Defaults to False.
+
+    Returns:
+        io.BytesIO or None: An io.BytesIO buffer containing the PNG image
+                            data, or None if an error occurs.
+    """
+
+    # --- Pre-checks ---
+    if not os.path.exists(FONT_PATH):
+        print(f"Error: Font file not found at '{FONT_PATH}'.")
+        return None
+    if not os.path.exists(LOGO_PATH):
+        print(f"Error: Logo file not found at '{LOGO_PATH}'.")
+        return None
+
+    # --- Load and Resize Logo ---
     try:
-        async with aiohttp.ClientSession() as session:
-            url = f"https://store.steampowered.com/api/appdetails?appids={STEAM_APP_ID}"
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if STEAM_APP_ID in data and data[STEAM_APP_ID]['success']:
-                        game_data = data[STEAM_APP_ID]['data']
-                        if not game_data.get('release_date', {}).get('coming_soon', True):
-                            return True
+        logo_img_original = Image.open(LOGO_PATH)
+        original_width, original_height = logo_img_original.size
+        new_width = int(original_width * LOGO_SCALE_FACTOR)
+        new_height = int(original_height * LOGO_SCALE_FACTOR)
+        logo_img = logo_img_original.resize((new_width, new_height), Image.Resampling.NEAREST)
+
+        if logo_img.mode != 'RGBA':
+            if logo_img.mode == 'P' and 'transparency' in logo_img.info:
+                logo_img = logo_img.convert('RGBA')
+            elif logo_img.mode != 'RGB':
+                 logo_img = logo_img.convert('RGBA')
+        logo_width, logo_height = logo_img.size
     except Exception as e:
-        print(f"Error checking Steam status: {e}")
-    return False
+        print(f"Error opening, resizing, or processing logo image '{LOGO_PATH}': {e}")
+        return None
 
-@tasks.loop(minutes=1)
-async def check_steam_status():
-    global game_released, release_message_sent
+    # --- Calculate Logo Position ---
+    logo_x = (IMG_WIDTH - logo_width) // 2
+    logo_y = PADDING
 
-    if game_released and release_message_sent:
-        check_steam_status.cancel()
-        print("Steam check: Game already released and announced. Task stopping.")
-        return
+    # --- Create Base Image ---
+    img = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color=BACKGROUND_COLOR)
+    draw = ImageDraw.Draw(img)
 
-    steam_confirms_release = await is_game_released_from_steam()
+    # Load fonts
+    try:
+        font_subtitle = ImageFont.truetype(FONT_PATH, FONT_SIZE_SUBTITLE)
+        font_date = ImageFont.truetype(FONT_PATH, FONT_SIZE_DATE)
+        font_timer = ImageFont.truetype(FONT_PATH, FONT_SIZE_TIMER) # Used for timer & "Released!"
+    except Exception as e:
+        print(f"An error occurred loading font variants: {e}")
+        return None
 
-    if steam_confirms_release and not game_released:
-        print("Steam API confirms game is released!")
-        game_released = True
-        save_state()
+    # --- Determine Text Content based on game_released ---
+    # Always format the date text
+    release_text_formatted = f"Releasing on {TARGET_DATE.strftime('%B %d, %Y').replace(f' {TARGET_DATE.day},', f' {TARGET_DATE.day:02d},')}"
 
-    if game_released and not release_message_sent:
-        channel = bot.get_channel(CHANNEL_ID)
-        if channel:
-            try:
-                new_name = "deltarune-is-out-now"
-                if channel.name != new_name:
-                    await channel.edit(name=new_name)
-                print(f"Game released! Updated channel name to {new_name}")
-
-                await channel.send("@everyone **DELTARUNE IS OUT NOW!** \n" +
-                                  "https://store.steampowered.com/app/1671210/DELTARUNE/")
-                print("Sent release announcement.")
-                release_message_sent = True
-                save_state()
-
-                update_countdown.cancel()
-                check_steam_status.change_interval(hours=24)
-                print("Cancelled update_countdown task. Reduced check_steam_status frequency.")
-            except Exception as e:
-                print(f"Error updating channel/sending message for release: {e}")
-    elif not steam_confirms_release and get_current_utc_time() > RELEASE_DATE.astimezone(pytz.UTC) + datetime.timedelta(days=1):
-        check_steam_status.change_interval(hours=1)
-        print("Past release date, game not detected as out. Reducing Steam check frequency.")
-
-@tasks.loop(minutes=5)
-async def update_countdown():
-    global tomorrow_message_sent, game_released
+    timer_color = TEXT_COLOR_GREY # Default color for countdown
 
     if game_released:
-        print("Countdown update: Game is marked released. Task stopping.")
-        update_countdown.cancel()
-        return
-
-    channel = bot.get_channel(CHANNEL_ID)
-    if not channel:
-        print(f"Error: Could not find channel with ID {CHANNEL_ID} for countdown update.")
-        return
-
-    # Use timezone-aware time for consistent calculations
-    current_utc = get_current_utc_time()
-    # Convert release date to UTC for comparison
-    release_date_utc = RELEASE_DATE.astimezone(pytz.UTC)
-    delta = release_date_utc - current_utc
-    days_remaining = delta.days
-    hours_remaining = delta.seconds // 3600
-
-    new_name = ""
-    send_message_content = None
-
-    if days_remaining > 1:
-        new_name = f"deltarune-in-{days_remaining}-days"
-    elif days_remaining == 1 or (days_remaining == 0 and hours_remaining > 12):
-        # If less than 24 hours but more than 12 hours, still consider it "tomorrow"
-        new_name = "deltarune-tomorrow"
-        if not tomorrow_message_sent:
-            send_message_content = ("@everyone **DELTARUNE LAUNCHES TOMORROW!** \n" +
-                                    "Get ready to play! The wait is almost over!")
-            tomorrow_message_sent = True
-            save_state()
-            print("Sent 'tomorrow' notification.")
-    elif days_remaining == 0 and hours_remaining >= 0:
-        # It's release day, but Steam API might not have confirmed yet.
-        new_name = "deltarune-releases-today"
-    else:  # RELEASE_DATE has passed
-        new_name = "deltarune-check-steam"
-
-    if new_name and channel.name != new_name:
-        try:
-            await channel.edit(name=new_name)
-            print(f"Updated channel name to {new_name} (UTC time: {current_utc}, Days remaining: {days_remaining}, Hours remaining: {hours_remaining})")
-        except discord.Forbidden:
-            print("Error: Bot doesn't have permission to edit channel name.")
-        except discord.HTTPException as e:
-            print(f"Error updating channel name: {e}")
-
-    if send_message_content:
-        try:
-            await channel.send(send_message_content)
-        except Exception as e:
-            print(f"Error sending scheduled message: {e}")
-
-@bot.tree.command(name="countdown", description="Get a visual countdown to Deltarune's release")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-async def countdown_command(interaction: discord.Interaction):
-    global game_released
-    
-    await interaction.response.defer(ephemeral=False)
-
-    try:
-        # Use the global game_released status, which is updated by check_steam_status
-        current_release_status_for_image = game_released
-        if not current_release_status_for_image:
-            current_release_status_for_image = await is_game_released_from_steam()
-            if current_release_status_for_image and not game_released:
-                game_released = True
-                save_state()
-
-        # The image generator needs the target date for its "Releasing on" text and countdown calc
-        image_buffer = create_countdown_image(
-            game_released=current_release_status_for_image,
-            target_date_override=RELEASE_DATE
-        )
-
-        if image_buffer is None:
-            await interaction.followup.send("Sorry, there was an error generating the countdown image.", ephemeral=True)
-            return
-
-        image_buffer.seek(0)
-        file = discord.File(fp=image_buffer, filename="deltarune_status.png")
-        text_message = ""
-
-        if current_release_status_for_image:
-            text_message = "Deltarune is out now! Go play it! https://store.steampowered.com/app/1671210/DELTARUNE/"
-        else:
-            # Use timezone-aware time for consistent calculations
-            current_utc = get_current_utc_time()
-            # Convert release date to UTC for comparison
-            release_date_utc = RELEASE_DATE.astimezone(pytz.UTC)
-            delta = release_date_utc - current_utc
-            days_remaining = delta.days
-            hours_remaining = delta.seconds // 3600
-            total_hours = int(delta.total_seconds() // 3600)
-
-            if total_hours > 48:
-                text_message = f"**{days_remaining} days** until Deltarune's release date ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')})!"
-            elif total_hours > 24:
-                text_message = f"**Deltarune releases tomorrow ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')})!** Get ready!"
-            elif total_hours > 0:
-                text_message = f"**Deltarune releases today in {total_hours} hours ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')})!** Keep an eye on Steam!"
-            elif total_hours >= -12:  # Within 12 hours past release time
-                text_message = f"**Deltarune should be releasing now ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')})!** Check Steam!"
-            else:  # RELEASE_DATE has passed by more than 12 hours
-                text_message = (f"The target release date ({RELEASE_DATE.strftime('%B %d, %Y %H:%M JST')}) has passed. "
-                                "It should be out or releasing very soon! Check Steam for the latest.")
-                                
-        await interaction.followup.send(content=text_message, file=file)
-
-    except Exception as e:
-        print(f"Error in countdown command: {e}")
-        if not interaction.response.is_done():
-            await interaction.response.send_message("Sorry, I encountered an error processing your request.", ephemeral=True)
-        else:
-            await interaction.followup.send("Sorry, I encountered an error processing your request.", ephemeral=True)
-
-if __name__ == "__main__":
-    if TOKEN is None or CHANNEL_ID is None:
-        print("Error: DISCORD_TOKEN or COUNTDOWN_CHANNEL_ID not found in .env file or environment variables.")
+        timer_text = "Released!"
+        timer_color = TEXT_COLOR_RELEASED # Use specific color for released state
     else:
-        bot.run(TOKEN)
+        # Calculate Countdown only if not released
+        now = datetime.datetime.now(TIMEZONE) # Get current time in Japan timezone
+        target_date_localized = TIMEZONE.localize(TARGET_DATE) # Localize TARGET_DATE to Japan timezone
+        time_diff = target_date_localized - now
+
+        if time_diff.total_seconds() < 0:
+            # If date passed but game_released wasn't explicitly set to True, show 0s
+            days, hours, minutes, seconds = 0, 0, 0, 0
+            # Optionally, you could auto-set timer_text to "Released!" here too
+            # timer_text = "Released!"
+            # timer_color = TEXT_COLOR_RELEASED
+            timer_text = f"{days:02d} : {hours:02d} : {minutes:02d} : {seconds:02d}"
+
+        else:
+            days = time_diff.days
+            remaining_seconds = time_diff.seconds
+            hours = remaining_seconds // 3600
+            minutes = (remaining_seconds % 3600) // 60
+            seconds = remaining_seconds % 60
+            timer_text = f"{days:02d} : {hours:02d} : {minutes:02d} : {seconds:02d}"
+
+
+    # --- Draw Elements ---
+
+    # 1. Paste Resized Logo
+    try:
+        paste_position = (logo_x, logo_y)
+        if logo_img.mode == 'RGBA':
+            img.paste(logo_img, paste_position, logo_img)
+        else:
+             img.paste(logo_img, paste_position)
+    except Exception as e:
+        print(f"Error pasting logo: {e}")
+
+    current_y = logo_y + logo_height + 20
+
+    # 2. Draw Subtitle
+    subtitle_bbox = draw_text_centered_padded(draw, "Chapters 1-4", current_y, font_subtitle, TEXT_COLOR_WHITE, IMG_WIDTH, PADDING)
+    if subtitle_bbox:
+        current_y = subtitle_bbox[3] + 45
+
+    # 3. Draw Release Date Text (Always drawn for now)
+    date_bbox = draw_text_centered_padded(draw, release_text_formatted, current_y, font_date, TEXT_COLOR_YELLOW, IMG_WIDTH, PADDING)
+    if date_bbox:
+        current_y = date_bbox[3] + 25
+
+    # 4. Draw Timer or "Released!" Text
+    timer_test_bbox = draw.textbbox((PADDING, current_y), timer_text, font=font_timer, anchor='lt')
+    timer_height = timer_test_bbox[3] - timer_test_bbox[1]
+    bottom_limit = IMG_HEIGHT - PADDING
+
+    if current_y + timer_height > bottom_limit:
+         print(f"Warning: Bottom text might extend below padding.")
+
+    # Draw the final text (either countdown or "Released!") using the determined color
+    timer_bbox = draw_text_centered_padded(draw, timer_text, current_y, font_timer, timer_color, IMG_WIDTH, PADDING)
+
+
+    # --- Save to Buffer ---
+    try:
+        buffer = io.BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        print("Image successfully created in buffer.")
+        return buffer
+    except Exception as e:
+        print(f"Error saving image to buffer: {e}")
+        return None
+
+
+# --- Example Usage ---
+if __name__ == "__main__":
+    # Example 1: Generate countdown image (default)
+    print("\nGenerating countdown image...")
+    image_buffer_countdown = create_countdown_image()
+    if image_buffer_countdown:
+        print("Successfully received countdown buffer.")
+        try:
+            with open("deltarune_countdown_buffer.png", "wb") as f:
+                f.write(image_buffer_countdown.getvalue())
+            print("Saved countdown image for verification.")
+        except Exception as e:
+            print(f"Error saving countdown buffer: {e}")
+    else:
+        print("Failed to create countdown image buffer.")
+
+    print("-" * 20)
+
+    # Example 2: Generate "Released!" image
+    print("Generating 'Released!' image...")
+    image_buffer_released = create_countdown_image(game_released=True) # Pass the optional argument
+    if image_buffer_released:
+        print("Successfully received 'Released!' buffer.")
+        try:
+            with open("deltarune_released_buffer.png", "wb") as f:
+                f.write(image_buffer_released.getvalue())
+            print("Saved 'Released!' image for verification.")
+        except Exception as e:
+            print(f"Error saving released buffer: {e}")
+    else:
+        print("Failed to create 'Released!' image buffer.")
