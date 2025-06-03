@@ -142,13 +142,13 @@ async def check_steam_status():
                 save_state()
 
                 update_countdown.cancel()
-                check_steam_status.change_interval(hours=24)
+                check_steam_status.change_interval(hours=24) # Keep checking, but very infrequently, e.g. if bot restarts after a while
                 print("Cancelled update_countdown task. Reduced check_steam_status frequency.")
             except Exception as e:
                 print(f"Error updating channel/sending message for release: {e}")
     elif not steam_confirms_release and datetime.datetime.now(JAPAN_TIMEZONE) > RELEASE_DATE_JST + datetime.timedelta(days=1) :
         check_steam_status.change_interval(hours=1)
-        print("Past release date, game not detected as out. Reducing Steam check frequency.")
+        print("Past release date, game not detected as out. Reducing Steam check frequency to hourly.")
 
 
 @tasks.loop(minutes=5)
@@ -179,17 +179,20 @@ async def update_countdown():
     elif days_remaining == 1:
         new_name = "deltarune-tomorrow"
         if not tomorrow_message_sent:
-            send_message_content = ("@everyone **DELTARUNE LAUNCHES TOMORROW!** \n" +
+            # ******** MODIFICATION START: Specify JST in "tomorrow" announcement ********
+            target_dt_str_for_announcement = RELEASE_DATE_JST.strftime('%B %d, %Y at %I:%M %p %Z')
+            send_message_content = (f"@everyone **DELTARUNE LAUNCHES TOMORROW!** (Target: {target_dt_str_for_announcement})\n" +
                                     "Get ready to play! The wait is almost over!")
+            # ******** MODIFICATION END ********
             tomorrow_message_sent = True # Modifies global
             save_state()
             print("Sent 'tomorrow' notification.")
     elif days_remaining == 0 and hours_remaining > 0:
         new_name = f"deltarune-in-{hours_remaining}-hours"
-    elif days_remaining == 0 and hours_remaining <= 0:
-        new_name = "deltarune-releases-today"
-    else:
-        new_name = "deltarune-check-steam"
+    elif days_remaining == 0 and hours_remaining <= 0: # Could also be < 0 if loop runs slightly late
+        new_name = "deltarune-releases-today" # Or "deltarune-imminent"
+    else: # days_remaining < 0 (release date has passed)
+        new_name = "deltarune-check-steam" # Or "deltarune-should-be-out"
 
     if new_name and channel.name != new_name:
         try:
@@ -213,24 +216,18 @@ async def update_countdown():
 async def countdown_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
 
-    # ******** MODIFICATION START ********
-    # Declare that we intend to use (and possibly modify) the global 'game_released'
-    # This MUST come before any use of 'game_released' in this function.
     global game_released
-    # ******** MODIFICATION END ********
 
     try:
-        # Now this read is fine, as 'game_released' is understood to be global for this scope
         current_release_status_for_image = game_released
 
         if not current_release_status_for_image:
-            # Perform a fresh check
             steam_check_result = await is_game_released_from_steam()
             if steam_check_result:
-                current_release_status_for_image = True # Update local var for current command execution
-                if not game_released: # Check if the global state actually needs updating
-                    game_released = True # Modify the actual global 'game_released'
-                    save_state() # Save the new global state
+                current_release_status_for_image = True
+                if not game_released:
+                    game_released = True
+                    save_state()
 
         image_buffer = create_countdown_image(
             game_released=current_release_status_for_image,
@@ -245,6 +242,10 @@ async def countdown_command(interaction: discord.Interaction):
         file = discord.File(fp=image_buffer, filename="deltarune_status.png")
         text_message = ""
 
+        # ******** MODIFICATION START: Use detailed date string with JST ********
+        target_dt_str = RELEASE_DATE_JST.strftime('%B %d, %Y at %I:%M %p %Z') # e.g., June 05, 2025 at 12:00 AM JST
+        # ******** MODIFICATION END ********
+
         if current_release_status_for_image:
             text_message = f"Deltarune is out now! Go play it! https://store.steampowered.com/app/{STEAM_APP_ID}/DELTARUNE/"
         else:
@@ -254,30 +255,27 @@ async def countdown_command(interaction: discord.Interaction):
             hours_remaining = int(total_seconds // 3600)
             days_remaining = delta.days
 
-            date_str = RELEASE_DATE_JST.strftime('%B %d, %Y')
-
+            # ******** MODIFICATION START: Update text messages to use target_dt_str and adjust phrasing ********
             if days_remaining > 1:
-                text_message = f"**{days_remaining} days** until Deltarune's target release date ({date_str})!"
+                text_message = f"**{days_remaining} days** until Deltarune releases (target: {target_dt_str})!"
             elif days_remaining == 1:
-                text_message = f"**Deltarune's target release is tomorrow ({date_str})!** Get ready!"
+                text_message = f"**Deltarune releases tomorrow!** (Target: {target_dt_str}) Get ready!"
             elif days_remaining == 0 and hours_remaining > 1:
-                text_message = f"**{hours_remaining} hours** until Deltarune's target release date ({date_str})!"
+                text_message = f"**{hours_remaining} hours** until Deltarune releases (target: {target_dt_str})!"
             elif days_remaining == 0 and hours_remaining == 1:
-                text_message = f"**{hours_remaining} hour** until Deltarune's target release date ({date_str})!"
-            elif days_remaining == 0 and hours_remaining <= 0:
-                text_message = f"**Deltarune's target release is today ({date_str})!** Keep an eye on Steam!"
-            else:
-                text_message = (f"The target release date ({date_str}) has passed. "
+                text_message = f"**{hours_remaining} hour** until Deltarune releases (target: {target_dt_str})!"
+            elif days_remaining == 0 and hours_remaining <= 0: # Could be <0 if command is run just after release time but before Steam check
+                text_message = f"**Deltarune releases today!** (Target: {target_dt_str}) Keep an eye on Steam!"
+            else: # days_remaining < 0
+                text_message = (f"The target release time ({target_dt_str}) has passed. "
                                 "It should be out or releasing very soon! Check Steam for the latest.")
+            # ******** MODIFICATION END ********
 
         await interaction.followup.send(content=text_message, file=file)
 
     except Exception as e:
-        print(f"Error in countdown command: {e}") # Good to log the specific exception
-        # Check if already responded to avoid "Interaction already responded" error.
-        # followup.send can be used if interaction.response.is_done() is True.
+        print(f"Error in countdown command: {e}")
         if not interaction.response.is_done():
-             # This state is unusual if defer was successful, but as a fallback.
             await interaction.response.send_message("Sorry, I encountered an error processing your request.", ephemeral=True)
         else:
             await interaction.followup.send("Sorry, I encountered an error processing your request.", ephemeral=True)
